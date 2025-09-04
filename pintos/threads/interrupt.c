@@ -47,6 +47,8 @@ struct gate {
 	uint32_t rsv2;
 };
 
+// 테스트용
+
 /* The Interrupt Descriptor Table (IDT).  The format is fixed by
    the CPU.  See [IA32-v3a] sections 5.10 "Interrupt Descriptor
    Table (IDT)", 5.11 "IDT Descriptors", 5.12.1.2 "Flag Usage By
