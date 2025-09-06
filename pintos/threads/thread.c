@@ -66,11 +66,8 @@ static tid_t allocate_tid (void);
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
-/* Returns the running thread.
- * Read the CPU's stack pointer `rsp', and then round that
- * down to the start of a page.  Since `struct thread' is
- * always at the beginning of a page and the stack pointer is
- * somewhere in the middle, this locates the curent thread. */
+/* 실행 중인 스레드를 반환합니다. CPU의 스택 포인터 'rsp'를 읽고, 그것을 페이지의 시작 부분으로 내림차순 반올림합니다. 
+'struct thread'는 항상 페이지의 시작 부분에 있고 스택 포인터는 중간 어딘가에 있으므로, 이것으로 현재 스레드를 찾아냅니다 */
 #define running_thread() ((struct thread *) (pg_round_down (rrsp ())))
 
 
@@ -220,7 +217,9 @@ void
 thread_block (void) {
 	ASSERT (!intr_context ());
 	ASSERT (intr_get_level () == INTR_OFF);
+	//현재 실행중인 스래드의 상태값을 대기상태로바꾼다.
 	thread_current ()->status = THREAD_BLOCKED;
+	//
 	schedule ();
 }
 
@@ -251,18 +250,16 @@ thread_name (void) {
 	return thread_current ()->name;
 }
 
-/* Returns the running thread.
-   This is running_thread() plus a couple of sanity checks.
-   See the big comment at the top of thread.h for details. */
-struct thread *
-thread_current (void) {
+/* 실행 중인 스레드를 반환합니다. 
+이는 running_thread()에 몇 가지 정상성 검사를 추가한 것입니다. 
+자세한 내용은 thread.h 상단의 큰 주석을 참조하세요. */
+// 현재 실행중인 스레드의 정보에 접근한다.
+struct thread* thread_current (void) {
 	struct thread *t = running_thread ();
 
-	/* Make sure T is really a thread.
-	   If either of these assertions fire, then your thread may
-	   have overflowed its stack.  Each thread has less than 4 kB
-	   of stack, so a few big automatic arrays or moderate
-	   recursion can cause stack overflow. */
+	/* T가 정말로 스레드인지 확인하세요. 이 두 assertion 중 하나라도 실행되면, 
+	당신의 스레드가 스택을 오버플로우했을 수 있습니다. 각 스레드는 4kB 미만의 스택을 가지므로,
+	몇 개의 큰 자동 배열이나 적당한 재귀 호출도 스택 오버플로우를 일으킬 수 있습니다. */
 	ASSERT (is_thread (t));
 	ASSERT (t->status == THREAD_RUNNING);
 
@@ -558,13 +555,12 @@ schedule (void) {
 #endif
 
 	if (curr != next) {
-		/* If the thread we switched from is dying, destroy its struct
-		   thread. This must happen late so that thread_exit() doesn't
-		   pull out the rug under itself.
-		   We just queuing the page free reqeust here because the page is
-		   currently used by the stack.
-		   The real destruction logic will be called at the beginning of the
-		   schedule(). */
+		/* 
+		전환된 스레드가 종료 중이라면, 그것의 struct thread를 파괴합니다. 
+		thread_exit()가 자기 자신의 발밑을 빼지 않도록 이것은 늦게 일어나야 합니다. 
+		페이지가 현재 스택에 의해 사용되고 있기 때문에 여기서는 페이지 해제 요청을 대기열에 넣기만 합니다. 
+		실제 파괴 로직은 schedule()의 시작 부분에서 호출될 것입니다..
+		 */
 		if (curr && curr->status == THREAD_DYING && curr != initial_thread) {
 			ASSERT (curr != next);
 			list_push_back (&destruction_req, &curr->elem);

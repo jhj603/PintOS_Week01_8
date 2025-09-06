@@ -23,6 +23,7 @@ static int64_t ticks;
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
+static struct list sleeping_list;
 
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
@@ -71,8 +72,7 @@ timer_calibrate (void) {
 }
 
 /* Returns the number of timer ticks since the OS booted. */
-int64_t
-timer_ticks (void) {
+int64_t timer_ticks (void) {
 	enum intr_level old_level = intr_disable ();
 	int64_t t = ticks;
 	intr_set_level (old_level);
@@ -82,21 +82,49 @@ timer_ticks (void) {
 
 /* Returns the number of timer ticks elapsed since THEN, which
    should be a value once returned by timer_ticks(). */
-int64_t
-timer_elapsed (int64_t then) {
+int64_t timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
-void
-timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
-
-	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+void timer_sleep(int64_t ticks) {
+	if (ticks == NULL) {
+		return;
+	}
+    if (ticks <= 0) {
+		return;
+	}
+    
+    enum intr_level old_level = intr_disable();
+    
+    // 현재 스레드 정보 설정
+    struct thread *current = thread_current();
+    current->wake_time = timer_ticks() + ticks;
+    
+    // sleeping 리스트에 추가, ELEM을 LIST의 끝에 삽입하여, 그것이 LIST의 뒤쪽이 되도록 합니다.
+    list_push_back(&sleeping_list, &current->sleep_elem);
+    
+    // 스레드 블록
+    thread_block();
+    
+    intr_set_level(old_level);
 }
 
+// 자고있는 스레드를 깨우는 함수
+void wake_sleeping_threads(void) {
+
+    struct list_elem *e = list_begin(&sleeping_list);
+
+    while (e != list_end(&sleeping_list)) {
+        struct thread *t = list_entry(e, struct thread, sleep_elem);
+        if (timer_ticks() >= t->wake_time) {
+            e = list_remove(e);
+            thread_unblock(t);
+        } else {
+            e = list_next(e);
+        }
+    }
+}
 /* Suspends execution for approximately MS milliseconds. */
 void
 timer_msleep (int64_t ms) {
@@ -120,7 +148,7 @@ void
 timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
+
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
