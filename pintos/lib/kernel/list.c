@@ -262,7 +262,7 @@ list_size (struct list *list) {
 	return cnt;
 }
 
-/* Returns true if LIST is empty, false otherwise. */
+/* LIST가 비어있으면 true를, 그렇지 않으면 false를 반환합니다. */
 bool
 list_empty (struct list *list) {
 	return list_begin (list) == list_end (list);
@@ -345,9 +345,10 @@ inplace_merge (struct list_elem *a0, struct list_elem *a1b0,
 		}
 }
 
-/* Sorts LIST according to LESS given auxiliary data AUX, using a
-   natural iterative merge sort that runs in O(n lg n) time and
-   O(1) space in the number of elements in LIST. */
+/* 
+보조 데이터 AUX가 주어진 LESS에 따라 LIST를 정렬합니다. 
+LIST의 요소 수에 대해 O(n lg n) 시간과 O(1) 공간에서 실행되는 자연스러운 반복적 병합 정렬을 사용합니다. 
+*/
 void
 list_sort (struct list *list, list_less_func *less, void *aux) {
 	size_t output_run_cnt;        /* Number of runs output in current pass. */
@@ -383,12 +384,13 @@ list_sort (struct list *list, list_less_func *less, void *aux) {
 	ASSERT (is_sorted (list_begin (list), list_end (list), less, aux));
 }
 
-/* Inserts ELEM in the proper position in LIST, which must be
-   sorted according to LESS given auxiliary data AUX.
-   Runs in O(n) average case in the number of elements in LIST. */
+/*
+ELEM을 LIST의 적절한 위치에 삽입합니다. 
+LIST는 보조 데이터 AUX가 주어진 LESS에 따라 정렬되어 있어야 합니다. 
+LIST의 요소 수에 대해 평균적으로 O(n) 시간에 실행됩니다. 
+*/
 void
-list_insert_ordered (struct list *list, struct list_elem *elem,
-		list_less_func *less, void *aux) {
+list_insert_ordered (struct list *list, struct list_elem *elem, list_less_func *less, void *aux) {
 	struct list_elem *e;
 
 	ASSERT (list != NULL);

@@ -44,6 +44,8 @@ timer_init (void) {
 	outb (0x40, count >> 8);
 
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+
+	list_init(&sleeping_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -87,26 +89,24 @@ int64_t timer_elapsed (int64_t then) {
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
-void timer_sleep(int64_t ticks) {
-	if (ticks == NULL) {
+void timer_sleep(int64_t cur_ticks) {
+
+    if (cur_ticks <= 0) {
 		return;
 	}
-    if (ticks <= 0) {
-		return;
-	}
-    
+
     enum intr_level old_level = intr_disable();
     
     // 현재 스레드 정보 설정
     struct thread *current = thread_current();
-    current->wake_time = timer_ticks() + ticks;
+    current->wake_time = timer_ticks() + cur_ticks;
     
     // sleeping 리스트에 추가, ELEM을 LIST의 끝에 삽입하여, 그것이 LIST의 뒤쪽이 되도록 합니다.
-    list_push_back(&sleeping_list, &current->sleep_elem);
+    list_push_back(&sleeping_list, &current->elem);
     
     // 스레드 블록
     thread_block();
-    
+    // 스레드의 인터럽트 홯성화
     intr_set_level(old_level);
 }
 
@@ -116,7 +116,7 @@ void wake_sleeping_threads(void) {
     struct list_elem *e = list_begin(&sleeping_list);
 
     while (e != list_end(&sleeping_list)) {
-        struct thread *t = list_entry(e, struct thread, sleep_elem);
+        struct thread *t = list_entry(e, struct thread, elem);
         if (timer_ticks() >= t->wake_time) {
             e = list_remove(e);
             thread_unblock(t);
@@ -154,6 +154,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	wake_sleeping_threads();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
