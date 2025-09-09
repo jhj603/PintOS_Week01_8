@@ -62,6 +62,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+bool priority_less(const struct list_elem *a, const struct list_elem *b, void *aux);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -228,17 +229,18 @@ thread_block (void) {
 호출자가 스스로 인터럽트를 비활성화한 경우, 원자적으로 스레드를 차단 해제하고 
 다른 데이터를 업데이트할 수 있을 것으로 기대할 수 있습니다. 
 */
-void
-thread_unblock (struct thread *t) {
-	enum intr_level old_level;
-
-	ASSERT (is_thread (t));
-
-	old_level = intr_disable ();
-	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
-	t->status = THREAD_READY;
-	intr_set_level (old_level);
+void thread_unblock (struct thread *t) {
+    enum intr_level old_level;
+    
+    ASSERT (is_thread (t));
+    
+    old_level = intr_disable ();
+    ASSERT (t->status == THREAD_BLOCKED);
+    
+    list_insert_ordered(&ready_list, &t->elem, priority_less, NULL);
+    
+    t->status = THREAD_READY;
+    intr_set_level (old_level);
 }
 
 /* Returns the name of the running thread. */
@@ -295,7 +297,7 @@ thread_yield (void) {
 
 	old_level = intr_disable ();
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, priority_less, NULL);
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -342,7 +344,7 @@ thread_get_recent_cpu (void) {
 /* 
 유휴 스레드입니다. 다른 스레드가 실행 준비가 되지 않았을 때 실행됩니다.
 유휴 스레드는 처음에 thread_start()에 의해 준비 리스트에 놓입니다. 처음에 한 번 스케줄되며, 
-그 시점에서 idle_thread를 초기화하고, 전달받은 세마포어를 "up"하여 thread_start()가 계속 진행할 수 있게 한 다음, 
+그 시점에서 idle_thread를 초기화하고, 전달받은 세마포어를 "up"하여 thread_start()가 계속 진행할 수 있게 한 다음,햣
 즉시 차단됩니다. 그 후에 유휴 스레드는 준비 리스트에 나타나지 않습니다. 
 준비 리스트가 비어있을 때 특별한 경우로 next_thread_to_run()에 의해 반환됩니다. 
 */
@@ -397,35 +399,45 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->magic = THREAD_MAGIC;
 }
 
-/* 
-스케줄될 다음 스레드를 선택하고 반환합니다. 실행 큐가 비어있지 않다면 실행 큐에서 스레드를 반환해야 합니다. 
-(실행 중인 스레드가 계속 실행될 수 있다면, 그것은 실행 큐에 있을 것입니다.) 실행 큐가 비어있다면 idle_thread를 반환합니다 
-*/
-static struct thread *
-next_thread_to_run (void) {
-
-	if (list_empty (&ready_list))
-		return idle_thread;
-	else
-		return list_entry (list_pop_front (&ready_list), struct thread, elem);
-
-}
-void insert_thread(struct list_elem* e){
-if (priority_less(e, list_begin(&ready_list), NULL)) {
-	list_push_front(&ready_list, e);
-}
-else {
-	
-}
-}
 // 우선순위 비교
 bool priority_less(const struct list_elem *a, const struct list_elem *b, void *aux) {
 
 	struct thread *ta = list_entry(a, struct thread, elem);
     struct thread *tb = list_entry(b, struct thread, elem);
     
+	ASSERT(is_thread(ta));
+    ASSERT(is_thread(tb));
+
     // 높은 우선순위가 앞에 오도록 (내림차순)
     return ta->priority > tb->priority;
+}
+/* 
+스케줄될 다음 스레드를 선택하고 반환합니다. 실행 큐가 비어있지 않다면 실행 큐에서 스레드를 반환해야 합니다. 
+(실행 중인 스레드가 계속 실행될 수 있다면, 그것은 실행 큐에 있을 것입니다.) 실행 큐가 비어있다면 idle_thread를 반환합니다 
+*/
+// static struct thread *
+// next_thread_to_run (void) {
+
+// 	if (list_empty (&ready_list))
+// 		return idle_thread;
+// 	else
+// 		return list_entry (list_pop_front (&ready_list), struct thread, elem);
+// }
+static struct thread *
+next_thread_to_run (void) {
+    if (list_empty (&ready_list))
+        return idle_thread;
+    else {
+        struct list_elem *e = list_pop_front(&ready_list);
+        struct thread *t = list_entry (e, struct thread, elem);
+        
+        // 디버깅: 유효성 검사
+        if (!is_thread(t)) {
+            PANIC("Invalid thread in ready_list");
+        }
+        
+        return t;
+    }
 }
 
 /* Use iretq to launch the thread */
