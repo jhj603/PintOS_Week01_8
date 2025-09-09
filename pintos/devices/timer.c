@@ -17,6 +17,9 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+/* 잠자는 리스트 속의 스레드 */
+static struct list sleep_list;
+
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -43,6 +46,9 @@ timer_init (void) {
 	outb (0x40, count >> 8);
 
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+
+	/* 잠자는 리스트 초기화 */
+	list_init(&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -87,14 +93,46 @@ timer_elapsed (int64_t then) {
 	return timer_ticks () - then;
 }
 
+/* 구조체 내부의 값으로 오름차순 정렬을 위한 함수 */
+static bool wake_time_less (const struct list_elem* a_, const struct list_elem* b_, void* aux UNUSED)
+{
+	const struct thread* a = list_entry(a_, struct thread, elem);
+	const struct thread* b = list_entry(b_, struct thread, elem);
+
+	return a->wake_time < b->wake_time;
+}
+
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
 
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+
+	/* busy waiting */
+	// while (timer_elapsed (start) < ticks)
+	// 	thread_yield ();
+
+	/* ticks가 0 이하면 재우지 않고 바로 깨워야 한다. */
+	if (0 < ticks)
+	{
+		/* 인터럽트 비활성화 */
+		enum intr_level old_level = intr_disable(); 
+
+		/* 현재 스레드 */
+		struct thread* curr = thread_current();
+		/* 일어날 시간 저장 */
+		curr->wake_time = start + ticks;
+
+		/* 대기 리스트에 현재 스레드 삽입 */
+		list_insert_ordered(&sleep_list, &curr->elem, wake_time_less, NULL);
+
+		/* 현재 스레드 재움 */
+		thread_block();
+
+		/* 인터럽트 재활성화 */
+		intr_set_level(old_level);
+	}
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -120,12 +158,36 @@ void
 timer_print_stats (void) {
 	printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
-
+
 /* Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+	/* 대기 리스트가 비어있지 않고 저장된 첫 스레드의 깨울 시간이 지났을 때 */
+	while (!list_empty(&sleep_list)) 
+	{
+		/* 대기 리스트에 저장된 스레드 */
+		struct thread* sleep_thread = list_entry(list_front(&sleep_list), struct thread, elem);
+
+		if (ticks >= sleep_thread->wake_time)
+		{
+			list_pop_front(&sleep_list);
+
+			/* 대기 상태에서 준비 상태로 바꾸고 준비 리스트로 옮김 */
+			thread_unblock(sleep_thread);
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	/* 깨울 대기 스레드들을 모두 깨운 뒤, 선점 결정 */
+	/* 깨운 스레드들 중 우선순위가 더 높은 스레드가 있을 수 있으므로 선점을 수행해야 함. */
+	/* 잠자던 스레드들을 전부 깨운 뒤, 현재 스레드보다 우선순위가 높다면 교체해야 함. */
+	/* thread_yield를 직접 호출하면 커널 패닉 유발 가능. 플래그 세팅으로 스위칭 예약 */
+	check_preemption_on_intr();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

@@ -107,6 +107,27 @@ struct thread {
 	/* Owned by thread.c. */
 	struct intr_frame tf;               /* Information for switching */
 	unsigned magic;                     /* Detects stack overflow. */
+
+	/* 깨어날 시간을 저장. 타이머 틱 값의 오버플로우 방지를 위해 적절한 자료형 선택 */
+	uint64_t wake_time;
+	/* 임시 우선순위를 위해 기존 우선순위를 저장할 변수 */
+	int original_priority;
+	/* 현재 기다리고 있는 락 정보를 저장할 변수 */
+	struct lock* wait_on_lock;
+	/* 기부받은 우선순위 저장 리스트 */
+	struct list donations;
+	struct list_elem donation_elem;
+};
+
+/* 어떤 스레드가 누구에게 우선순위를 기부했는지와 그 우선순위 값을 저장하는 구조체*/
+struct donation
+{
+	/* 리스트 노드 */
+	struct list_elem elem;
+	/* 우선순위를 기부한 스레드 */
+	struct thread* donor_thread;
+	/* 기부된 우선순위 값 */
+	int donated_priority;
 };
 
 /* If false (default), use round-robin scheduler.
@@ -142,5 +163,17 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
+
+/* 우선순위 순으로 정렬 비교 함수 */
+bool priority_greater(const struct list_elem* a_, const struct list_elem* b_, void* aux UNUSED);
+
+/* 현재 스레드와 준비 리스트의 첫 스레드 간의 우선순위 비교 함수 */
+void check_preemption(void);
+void check_preemption_on_intr(void);
+
+/* 우선순위 기부 체인을 따라 우선순위 전달 헬퍼 함수 */
+void donate_priority(struct thread* t);
+/* 스레드의 donations를 이용해서 우선순위 재계산 헬퍼 함수 */
+void refresh_priority(void);
 
 #endif /* threads/thread.h */

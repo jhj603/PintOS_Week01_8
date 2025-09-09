@@ -79,6 +79,15 @@ static tid_t allocate_tid (void);
 // setup temporal gdt first.
 static uint64_t gdt[3] = { 0, 0x00af9a000000ffff, 0x00cf92000000ffff };
 
+/* 우선순위 높은 순으로 저장하기 위한 비교 함수 */
+bool priority_greater(const struct list_elem* a_, const struct list_elem* b_, void* aux UNUSED)
+{
+	const struct thread* a = list_entry(a_, struct thread, elem);
+	const struct thread* b = list_entry(b_, struct thread, elem);
+
+	return a->priority > b->priority;
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -135,6 +144,7 @@ thread_start (void) {
 
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
+/* 스케줄링과 관련된 복잡한 로직(현재 스레드 실행 시간 관리, 우선순위 비교, 컨텍스트 스위치 준비) 처리*/
 void
 thread_tick (void) {
 	struct thread *t = thread_current ();
@@ -150,6 +160,7 @@ thread_tick (void) {
 		kernel_ticks++;
 
 	/* Enforce preemption. */
+	/* 라운드 로빈. 타임 슬라이스를 전부 소모하면 다음 스레드로 전환 */
 	if (++thread_ticks >= TIME_SLICE)
 		intr_yield_on_return ();
 }
@@ -207,6 +218,13 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	/* 현재 스레드의 우선순위가 깨운 스레드의 우선순위보다 낮다면 교체 */
+	if (priority > thread_current()->priority)
+	{
+		/* 무조건 스레드 컨텍스트에서만 호출 */
+		thread_yield();
+	}
+
 	return tid;
 }
 
@@ -240,8 +258,14 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	
+	//list_push_back (&ready_list, &t->elem);
+
+	/* 삽입 시 우선순위 순으로 정렬하면서 삽입 */
+	list_insert_ordered(&ready_list, &t->elem, priority_greater, NULL);
+	
 	t->status = THREAD_READY;
+
 	intr_set_level (old_level);
 }
 
@@ -294,16 +318,29 @@ thread_exit (void) {
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
+/* CPU를 양보하지만 현재 스레드를 재우지 않는다. 즉시 다시 스케줄될 수도 있다. */
 void
 thread_yield (void) {
 	struct thread *curr = thread_current ();
 	enum intr_level old_level;
 
-	ASSERT (!intr_context ());
+	/* 인터럽트 컨텍스트 안에서 호출하면 안된다. */
+	/* 유저 모드 또는 스레드 컨텍스트에서만 호출되어야 하는 함수임을 알림. */
+	/* 컨텍스트 스위칭 수행 시, 스레드 스택을 전환하는데 인터럽트 핸들러에서 수행하면 커널 패닉을 일으킬 수 있음 */
+	/* 인터럽트 발생 시 시스템은 즉시 인터럽트 핸들러로 전환. 이 때, thread_yield가 호출되면 이미 인터럽트를 처리 중인데 */
+	/* 또 다른 스케줄링 결정을 내려야 하는 상황이 되고 이것은 예측 불가능한 동작을 유발할 수 있음.*/
+	ASSERT (!intr_context());
 
 	old_level = intr_disable ();
+
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+	{
+		//list_push_back (&ready_list, &curr->elem);
+		/* 현재 스레드를 다시 준비 리스트에 넣는데 우선순위를 오름차순 기준으로 넣는다 */
+		list_insert_ordered(&ready_list, &curr->elem, priority_greater, NULL);
+	}
+	
+	/* 스케줄러 실행 전, 스레드 상태를 변경하는 함수. 스케줄링을 준비. */
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -311,7 +348,11 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *curr = thread_current ();
+
+	curr->priority = new_priority;
+
+	check_preemption();
 }
 
 /* Returns the current thread's priority. */
@@ -409,6 +450,11 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
+
+	t->original_priority = priority;
+	t->wait_on_lock = NULL;
+	
+	list_init(&t->donations);
 }
 
 /* Chooses and returns the next thread to be scheduled.  Should
@@ -535,6 +581,7 @@ do_schedule(int status) {
 		palloc_free_page(victim);
 	}
 	thread_current ()->status = status;
+	/* 실제 스케줄링을 수행하는 함수 */
 	schedule ();
 }
 
@@ -587,4 +634,88 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+/* 현재 스레드와 준비 리스트의 첫 스레드 간의 우선순위 비교 함수 */
+/* 현재 스레드 우선순위가 더 낮다면 교환 */
+void check_preemption(void)
+{
+	struct thread* cur = thread_current();
+
+	/* 준비 리스트가 비어있지 않다면*/
+	if (!list_empty(&ready_list))
+	{
+		/* 현재 스레드의 우선순위가 준비 리스트의 첫 스레드의 우선순위보다 낮다면 */
+		if (cur->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+		{
+			/* CPU를 양보하고 컨텍스트 스위칭을 수행 -> 스레드 교환 */
+			/* 컨텍스트 스위칭 */
+			thread_yield();
+		}
+	}
+}
+
+void check_preemption_on_intr(void)
+{
+	struct thread* cur = thread_current();
+
+	/* 준비 리스트가 비어있지 않다면*/
+	if (!list_empty(&ready_list))
+	{
+		/* 현재 스레드의 우선순위가 준비 리스트의 첫 스레드의 우선순위보다 낮다면 */
+		if (cur->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+		{
+			/* CPU를 양보하고 컨텍스트 스위칭을 수행 -> 스레드 교환 */
+			/* 컨텍스트 스위칭 예약 */
+			intr_yield_on_return();
+		}
+	}
+}
+
+/* 우선순위 기부 체인을 따라 우선순위 전달 헬퍼 함수 */
+void donate_priority(struct thread* t)
+{
+	/* 현재 스레드가 기다리는 락의 소유자를 찾음 */
+	struct lock* lock = t->wait_on_lock;
+	struct thread* lock_holder = lock->holder;
+
+	/* donations 리스트에 현재 스레드의 donation_elem을 우선순위 순으로 추가 */
+	list_insert_ordered(&lock_holder->donations, &t->donation_elem, priority_greater, NULL);
+
+	/* 락 소유자의 우선순위 업데이트 */
+	if (lock_holder->priority < t->priority)
+	{
+		lock_holder->priority = t->priority;
+	}
+
+	/* 락 소유자도 다른 락을 기다린다면 재귀적으로 우선순위 기부 */
+	if (NULL != lock_holder->wait_on_lock)
+	{
+		donate_priority(lock_holder);
+	}
+}
+
+/* 스레드의 donations를 이용해서 우선순위 재계산 헬퍼 함수 */
+void refresh_priority(void)
+{
+	struct thread* cur = thread_current();
+
+	/* 기부받은 우선순위 중 가장 높은 값 */
+	int high_priority = PRI_MIN;
+
+	if (!list_empty(&cur->donations))
+	{
+		struct thread* donor = list_entry(list_front(&cur->donations), struct thread, donation_elem);
+		high_priority = donor->priority;	
+	}
+
+	/* 최종 우선순위를 원래 우선순위와 기부받은 우선순위 중 가장 큰 값으로 설정 */
+	if (cur->original_priority > high_priority)
+	{
+		cur->priority = cur->original_priority;
+	}
+	else
+	{
+		cur->priority = high_priority;
+	}
 }
