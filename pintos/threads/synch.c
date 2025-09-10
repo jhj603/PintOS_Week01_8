@@ -98,10 +98,10 @@ sema_try_down (struct semaphore *sema) {
 	return success;
 }
 
-/* Up or "V" operation on a semaphore.  Increments SEMA's value
-   and wakes up one thread of those waiting for SEMA, if any.
-
-   This function may be called from an interrupt handler. */
+/* 
+세마포어의 Up 또는 "V" 연산입니다. SEMA의 값을 증가시키고 SEMA를 기다리고 있는 스레드 중 하나를 깨웁니다(있는 경우). 
+이 함수는 인터럽트 핸들러에서 호출될 수 있습니다. 
+*/
 void
 sema_up (struct semaphore *sema) {
 	enum intr_level old_level;

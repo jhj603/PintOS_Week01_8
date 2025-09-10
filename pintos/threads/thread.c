@@ -178,7 +178,7 @@ thread_create (const char *name, int priority,
 	thread_func *function, void *aux) {
 	struct thread *t;
 	tid_t tid;
-
+	struct thread* cur = thread_current();
 	ASSERT (function != NULL);
 
 	/* Allocate thread. */
@@ -204,6 +204,13 @@ thread_create (const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	enum intr_level oldlevel = intr_disable();
+
+	if (t->priority > cur->priority) {
+		thread_yield();
+	}
+
+	intr_set_level(oldlevel);
 	return tid;
 }
 
@@ -305,7 +312,28 @@ thread_yield (void) {
 /* 현재 스레드의 우선순위를 NEW_PRIORITY로 설정합니다. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+
+	bool yield_need = true;
+	struct thread* curr = thread_current();
+	enum intr_level old_level;
+
+	curr->priority = new_priority;
+
+	old_level = intr_disable();
+
+	if (!list_empty(&ready_list)) {
+		struct thread* top = list_entry(list_begin(&ready_list), struct thread, elem);
+		if (curr->priority > top->priority) {
+			yield_need = false;
+		}
+	}
+
+	intr_set_level(old_level);
+
+	if(yield_need) {
+		thread_yield();
+	}
+
 }
 
 /* 현재 스레드의 우선순위를 반환합니다. */
