@@ -85,6 +85,7 @@ typedef int tid_t;
  * only because they are mutually exclusive: only a thread in the
  * ready state is on the run queue, whereas only a thread in the
  * blocked state is on a semaphore wait list. */
+
 struct thread {
 	/* Owned by thread.c. */
 	tid_t tid;                          /* Thread identifier. */
@@ -110,24 +111,15 @@ struct thread {
 
 	/* 깨어날 시간을 저장. 타이머 틱 값의 오버플로우 방지를 위해 적절한 자료형 선택 */
 	uint64_t wake_time;
-	/* 임시 우선순위를 위해 기존 우선순위를 저장할 변수 */
+
+	/* 기부 받기 전 원래 우선순위 저장 변수 */
 	int original_priority;
-	/* 현재 기다리고 있는 락 정보를 저장할 변수 */
+	/* 현재 스레드가 대기하고 있는 락을 가리키는 포인터 */
 	struct lock* wait_on_lock;
 	/* 기부받은 우선순위 저장 리스트 */
 	struct list donations;
+	/* 다른 스레드의 donations 리스트에 저장될 때 사용할 elem */
 	struct list_elem donation_elem;
-};
-
-/* 어떤 스레드가 누구에게 우선순위를 기부했는지와 그 우선순위 값을 저장하는 구조체*/
-struct donation
-{
-	/* 리스트 노드 */
-	struct list_elem elem;
-	/* 우선순위를 기부한 스레드 */
-	struct thread* donor_thread;
-	/* 기부된 우선순위 값 */
-	int donated_priority;
 };
 
 /* If false (default), use round-robin scheduler.
@@ -169,11 +161,14 @@ bool priority_greater(const struct list_elem* a_, const struct list_elem* b_, vo
 
 /* 현재 스레드와 준비 리스트의 첫 스레드 간의 우선순위 비교 함수 */
 void check_preemption(void);
-void check_preemption_on_intr(void);
 
 /* 우선순위 기부 체인을 따라 우선순위 전달 헬퍼 함수 */
-void donate_priority(struct thread* t);
+//void donate_priority(struct thread* cur);
+void donate_priority(struct thread* cur);
 /* 스레드의 donations를 이용해서 우선순위 재계산 헬퍼 함수 */
-void refresh_priority(void);
+//void refresh_priority(struct thread* t);
+void refresh_priority(struct thread* t);
+/* 락 해제 시, 락으로 인해 자신에게 기부했던 모든 스레드와의 관계를 지우는 함수 */
+void remove_donations(struct lock* lock);
 
 #endif /* threads/thread.h */

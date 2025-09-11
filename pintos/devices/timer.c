@@ -164,6 +164,7 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
 	thread_tick ();
+
 	/* 대기 리스트가 비어있지 않고 저장된 첫 스레드의 깨울 시간이 지났을 때 */
 	while (!list_empty(&sleep_list)) 
 	{
@@ -187,7 +188,7 @@ timer_interrupt (struct intr_frame *args UNUSED) {
 	/* 깨운 스레드들 중 우선순위가 더 높은 스레드가 있을 수 있으므로 선점을 수행해야 함. */
 	/* 잠자던 스레드들을 전부 깨운 뒤, 현재 스레드보다 우선순위가 높다면 교체해야 함. */
 	/* thread_yield를 직접 호출하면 커널 패닉 유발 가능. 플래그 세팅으로 스위칭 예약 */
-	check_preemption_on_intr();
+	check_preemption();
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
